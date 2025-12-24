@@ -8,6 +8,7 @@ import (
 
 	"github.com/alireza0/s-ui/database"
 	"github.com/alireza0/s-ui/database/model"
+	"github.com/alireza0/s-ui/logger"
 	"github.com/alireza0/s-ui/util"
 	"github.com/alireza0/s-ui/util/common"
 
@@ -250,7 +251,19 @@ func (s *InboundService) hasUser(inboundType string) bool {
 	return false
 }
 
-func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition string, inbound map[string]interface{}) ([]json.RawMessage, error) {
+type inboundUserRecord struct {
+	Name      string `gorm:"column:name"`
+	MaxOnline int    `gorm:"column:max_online"`
+	User      string `gorm:"column:user"`
+}
+
+func (s *InboundService) fetchUsers(
+	db *gorm.DB,
+	inboundType string,
+	condition string,
+	inbound map[string]interface{},
+	onlineUserCounts map[string]int,
+) ([]json.RawMessage, error) {
 	if inboundType == "shadowtls" {
 		version, _ := inbound["version"].(float64)
 		if int(version) < 3 {
@@ -264,21 +277,34 @@ func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition s
 		}
 	}
 
-	var users []string
-
+	var users []inboundUserRecord
 	err := db.Raw(
-		fmt.Sprintf(`SELECT json_extract(clients.config, "$.%s")
-		FROM clients WHERE enable = true AND %s`,
-			inboundType, condition)).Scan(&users).Error
+		fmt.Sprintf(`SELECT clients.name, clients.max_online, json_extract(clients.config, "$.%s") AS user
+FROM clients WHERE enable = true AND %s`,
+			inboundType, condition),
+	).Scan(&users).Error
 	if err != nil {
 		return nil, err
 	}
+
 	var usersJson []json.RawMessage
-	for _, user := range users {
-		if inboundType == "vless" && inbound["tls"] == nil {
-			user = strings.Replace(user, "xtls-rprx-vision", "", -1)
+	for _, u := range users {
+		if u.User == "" || u.User == "null" {
+			continue
 		}
-		usersJson = append(usersJson, json.RawMessage(user))
+
+		// Enforce max online if set
+		if u.MaxOnline > 0 && onlineUserCounts[u.Name] >= u.MaxOnline {
+			logger.Info("Skipping client due to max online limit: ", u.Name, " limit: ", u.MaxOnline)
+			continue
+		}
+
+		userConfig := u.User
+		if inboundType == "vless" && inbound["tls"] == nil {
+			userConfig = strings.Replace(userConfig, "xtls-rprx-vision", "", -1)
+		}
+
+		usersJson = append(usersJson, json.RawMessage(userConfig))
 	}
 	return usersJson, nil
 }
@@ -294,8 +320,9 @@ func (s *InboundService) addUsers(db *gorm.DB, inboundJson []byte, inboundId uin
 		return nil, err
 	}
 
+	onlineUserCounts := StatsService{}.GetOnlineUserCounts()
 	condition := fmt.Sprintf("%d IN (SELECT json_each.value FROM json_each(clients.inbounds))", inboundId)
-	inbound["users"], err = s.fetchUsers(db, inboundType, condition, inbound)
+	inbound["users"], err = s.fetchUsers(db, inboundType, condition, inbound, onlineUserCounts)
 	if err != nil {
 		return nil, err
 	}
@@ -319,8 +346,9 @@ func (s *InboundService) initUsers(db *gorm.DB, inboundJson []byte, clientIds st
 		return nil, err
 	}
 
+	onlineUserCounts := StatsService{}.GetOnlineUserCounts()
 	condition := fmt.Sprintf("id IN (%s)", strings.Join(ClientIds, ","))
-	inbound["users"], err = s.fetchUsers(db, inboundType, condition, inbound)
+	inbound["users"], err = s.fetchUsers(db, inboundType, condition, inbound, onlineUserCounts)
 	if err != nil {
 		return nil, err
 	}
