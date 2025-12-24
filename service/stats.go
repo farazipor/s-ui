@@ -1,6 +1,7 @@
 package service
 
 import (
+	"sync"
 	"time"
 
 	"github.com/alireza0/s-ui/database"
@@ -15,7 +16,11 @@ type onlines struct {
 	Outbound []string `json:"outbound,omitempty"`
 }
 
-var onlineResources = &onlines{}
+var (
+	onlineResources   = &onlines{}
+	onlineUserCount   = map[string]int{}
+	onlineResourcesMu sync.RWMutex
+)
 
 type StatsService struct {
 }
@@ -26,12 +31,15 @@ func (s *StatsService) SaveStats(enableTraffic bool) error {
 	}
 	stats := corePtr.GetInstance().StatsTracker().GetStats()
 
-	// Reset onlines
-	onlineResources.Inbound = nil
-	onlineResources.Outbound = nil
-	onlineResources.User = nil
+	// Build next snapshots (avoid mutating shared globals while iterating)
+	nextOnlineResources := onlines{}
+	nextOnlineUserCount := map[string]int{}
 
 	if len(*stats) == 0 {
+		onlineResourcesMu.Lock()
+		onlineResources = &onlines{}
+		onlineUserCount = map[string]int{}
+		onlineResourcesMu.Unlock()
 		return nil
 	}
 
@@ -59,17 +67,28 @@ func (s *StatsService) SaveStats(enableTraffic bool) error {
 				return err
 			}
 		}
+
+		// online snapshot and per-user count (upload direction only)
 		if stat.Direction {
 			switch stat.Resource {
 			case "inbound":
-				onlineResources.Inbound = append(onlineResources.Inbound, stat.Tag)
+				nextOnlineResources.Inbound = append(nextOnlineResources.Inbound, stat.Tag)
 			case "outbound":
-				onlineResources.Outbound = append(onlineResources.Outbound, stat.Tag)
+				nextOnlineResources.Outbound = append(nextOnlineResources.Outbound, stat.Tag)
 			case "user":
-				onlineResources.User = append(onlineResources.User, stat.Tag)
+				nextOnlineResources.User = append(nextOnlineResources.User, stat.Tag)
+				nextOnlineUserCount[stat.Tag]++
 			}
 		}
 	}
+
+	// Swap snapshots atomically
+	onlineResourcesMu.Lock()
+	onlineResources.Inbound = nextOnlineResources.Inbound
+	onlineResources.Outbound = nextOnlineResources.Outbound
+	onlineResources.User = nextOnlineResources.User
+	onlineUserCount = nextOnlineUserCount
+	onlineResourcesMu.Unlock()
 
 	if !enableTraffic {
 		return nil
@@ -97,8 +116,22 @@ func (s *StatsService) GetStats(resource string, tag string, limit int) ([]model
 }
 
 func (s *StatsService) GetOnlines() (onlines, error) {
+	onlineResourcesMu.RLock()
+	defer onlineResourcesMu.RUnlock()
 	return *onlineResources, nil
 }
+
+func (s *StatsService) GetOnlineUserCounts() map[string]int {
+	onlineResourcesMu.RLock()
+	defer onlineResourcesMu.RUnlock()
+
+	result := make(map[string]int, len(onlineUserCount))
+	for user, count := range onlineUserCount {
+		result[user] = count
+	}
+	return result
+}
+
 func (s *StatsService) DelOldStats(days int) error {
 	oldTime := time.Now().AddDate(0, 0, -(days)).Unix()
 	db := database.GetDB()
