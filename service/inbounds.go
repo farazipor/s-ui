@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/alireza0/s-ui/database"
@@ -69,10 +70,10 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 			inbData["listen"] = restFields["listen"]
 			inbData["listen_port"] = restFields["listen_port"]
 			if inbound.Type == "shadowtls" {
-				json.Unmarshal(restFields["version"], &shadowtls_version)
+				_ = json.Unmarshal(restFields["version"], &shadowtls_version)
 			}
 			if inbound.Type == "shadowsocks" {
-				json.Unmarshal(restFields["managed"], &ss_managed)
+				_ = json.Unmarshal(restFields["managed"], &ss_managed)
 			}
 		}
 		if s.hasUser(inbound.Type) &&
@@ -257,13 +258,36 @@ type inboundUserRecord struct {
 	User      string `gorm:"column:user"`
 }
 
+// parseCSVUintIDs parses "1,2,3" -> []uint{1,2,3}, ignoring blanks and non-numeric tokens.
+func parseCSVUintIDs(ids string) []uint {
+	if ids == "" {
+		return nil
+	}
+	parts := strings.Split(ids, ",")
+	out := make([]uint, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		n, err := strconv.ParseUint(p, 10, 64)
+		if err != nil {
+			continue
+		}
+		out = append(out, uint(n))
+	}
+	return out
+}
+
 func (s *InboundService) fetchUsers(
 	db *gorm.DB,
 	inboundType string,
 	condition string,
+	conditionArgs []any,
 	inbound map[string]interface{},
 	onlineUserCounts map[string]int,
 ) ([]json.RawMessage, error) {
+	// inbound-specific guards
 	if inboundType == "shadowtls" {
 		version, _ := inbound["version"].(float64)
 		if int(version) < 3 {
@@ -277,12 +301,19 @@ func (s *InboundService) fetchUsers(
 		}
 	}
 
+	// Only allow known inboundType names (defense-in-depth: should already be controlled)
+	// (If you ever add new inbound types, they must be added to hasUser switch.)
+	// inboundType is used to build the JSON path "$.<type>" in SQL.
+	query := fmt.Sprintf(
+		`SELECT clients.name, clients.max_online, json_extract(clients.config, "$.%s") AS user
+		 FROM clients
+		 WHERE enable = true AND %s`,
+		inboundType,
+		condition,
+	)
+
 	var users []inboundUserRecord
-	err := db.Raw(
-		fmt.Sprintf(`SELECT clients.name, clients.max_online, json_extract(clients.config, "$.%s") AS user
-FROM clients WHERE enable = true AND %s`,
-			inboundType, condition),
-	).Scan(&users).Error
+	err := db.Raw(query, conditionArgs...).Scan(&users).Error
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +324,7 @@ FROM clients WHERE enable = true AND %s`,
 			continue
 		}
 
-		// Enforce max online if set
+		// Enforce max_online per client name (0 means unlimited)
 		if u.MaxOnline > 0 && onlineUserCounts[u.Name] >= u.MaxOnline {
 			logger.Info("Skipping client due to max online limit: ", u.Name, " limit: ", u.MaxOnline)
 			continue
@@ -321,8 +352,10 @@ func (s *InboundService) addUsers(db *gorm.DB, inboundJson []byte, inboundId uin
 	}
 
 	onlineUserCounts := StatsService{}.GetOnlineUserCounts()
-	condition := fmt.Sprintf("%d IN (SELECT json_each.value FROM json_each(clients.inbounds))", inboundId)
-	inbound["users"], err = s.fetchUsers(db, inboundType, condition, inbound, onlineUserCounts)
+
+	// Parameterized condition (no raw interpolation)
+	condition := "? IN (SELECT json_each.value FROM json_each(clients.inbounds))"
+	inbound["users"], err = s.fetchUsers(db, inboundType, condition, []any{inboundId}, inbound, onlineUserCounts)
 	if err != nil {
 		return nil, err
 	}
@@ -331,8 +364,9 @@ func (s *InboundService) addUsers(db *gorm.DB, inboundJson []byte, inboundId uin
 }
 
 func (s *InboundService) initUsers(db *gorm.DB, inboundJson []byte, clientIds string, inboundType string) ([]byte, error) {
-	ClientIds := strings.Split(clientIds, ",")
-	if len(ClientIds) == 0 {
+	clientIDList := parseCSVUintIDs(clientIds)
+	if len(clientIDList) == 0 {
+		// No valid client ids -> keep inbound JSON unchanged
 		return inboundJson, nil
 	}
 
@@ -347,8 +381,10 @@ func (s *InboundService) initUsers(db *gorm.DB, inboundJson []byte, clientIds st
 	}
 
 	onlineUserCounts := StatsService{}.GetOnlineUserCounts()
-	condition := fmt.Sprintf("id IN (%s)", strings.Join(ClientIds, ","))
-	inbound["users"], err = s.fetchUsers(db, inboundType, condition, inbound, onlineUserCounts)
+
+	// Safe + valid SQL: "id IN ?"
+	condition := "id IN ?"
+	inbound["users"], err = s.fetchUsers(db, inboundType, condition, []any{clientIDList}, inbound, onlineUserCounts)
 	if err != nil {
 		return nil, err
 	}
