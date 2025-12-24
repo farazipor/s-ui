@@ -33,6 +33,7 @@ type Client struct {
 	Expiry   int64           `json:"expiry" form:"expiry"`
 	Down     int64           `json:"down" form:"down"`
 	Up       int64           `json:"up" form:"up"`
+	MaxOnline int            `json:"maxOnline" form:"maxOnline" gorm:"column:max_online;default:0"`
 	Desc     string          `json:"desc" form:"desc"`
 	Group    string          `json:"group" form:"group"`
 }
