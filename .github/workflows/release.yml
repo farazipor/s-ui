@@ -1,0 +1,83 @@
+name: build-and-release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # ---------- FRONTEND ----------
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "frontend/package-lock.json"
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: |
+          npm ci || npm install
+          npm run build
+
+      # ---------- BACKEND ----------
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          # پیشنهاد: اول با 1.22/1.23 تست کن (پایدارتر برای خیلی از ماژول‌ها)
+          go-version: "1.23.x"
+          cache: true
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc
+
+      - name: Prepare web assets for backend
+        run: |
+          rm -rf web/html
+          mkdir -p web/html
+          cp -r frontend/dist/* web/html/
+
+      - name: Go mod tidy
+        run: |
+          go mod tidy
+
+      - name: Build backend
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          go build -ldflags="-w -s" -o sui .
+
+      # ---------- PACKAGE ----------
+      - name: Make release tarball
+        run: |
+          mkdir -p out/s-ui
+          cp sui out/s-ui/sui
+
+          # اگر این فایل‌ها رو داری تو ریپو، کپی میشن. اگر نداری، مرحله بعدی رو می‌گم.
+          [ -f s-ui.service ] && cp s-ui.service out/s-ui/s-ui.service || true
+          [ -f s-ui.sh ] && cp s-ui.sh out/s-ui/s-ui.sh || true
+
+          tar -czf s-ui-linux-amd64.tar.gz -C out s-ui
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            s-ui-linux-amd64.tar.gz
