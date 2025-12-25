@@ -116,7 +116,7 @@ require (
 	github.com/sagernet/sing-tun v0.7.3 // indirect
 	github.com/sagernet/sing-vmess v0.2.7 // indirect
 	github.com/sagernet/smux v1.5.34-mod.2 // indirect
-	github.com/sagernet/tailscale v1.80.3-sing-box-1.12-mod.2 // indirect
+	github.com/sagernet/tailscale v1.80.3-sing-box-1.12-mod.1 // indirect
 	github.com/sagernet/wireguard-go v0.0.1-beta.7 // indirect
 	github.com/sagernet/ws v0.0.0-20231204124109-acfe8907c854 // indirect
 	github.com/tailscale/certstore v0.1.1-0.20231202035212-d3fa0460f47e // indirect
