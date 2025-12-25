@@ -1,39 +1,58 @@
-name: Build & Release s-ui
+name: build-and-release
 
 on:
   push:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci || npm install
+          npm run build
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
 
-      - name: Build backend
+      - name: Build backend (linux/amd64)
+        env:
+          CGO_ENABLED: "1"
+          GOOS: linux
+          GOARCH: amd64
         run: |
           go mod tidy
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o sui
+          go build -ldflags="-w -s" -o sui .
 
-      - name: Prepare release files
+      - name: Package (tar.gz)
         run: |
-          mkdir -p s-ui
-          mv sui s-ui/
-          cp s-ui.service s-ui/
-          cp s-ui.sh s-ui/
-          tar -czf s-ui-linux-amd64.tar.gz s-ui
+          mkdir -p dist/s-ui
+          cp -r web dist/s-ui/ || true
+          mkdir -p dist/s-ui/web/html
+          cp -r frontend/dist/* dist/s-ui/web/html/
+          cp sui dist/s-ui/sui
+          cp -r systemd dist/s-ui/ 2>/dev/null || true
+          tar -C dist -czf s-ui-linux-amd64.tar.gz s-ui
 
-      - name: Create Release
+      - name: Create Release and upload asset
         uses: softprops/action-gh-release@v2
         with:
           files: s-ui-linux-amd64.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
