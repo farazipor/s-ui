@@ -39,7 +39,12 @@ jobs:
           CGO_ENABLED: "1"
           GOOS: linux
           GOARCH: amd64
+          GOTOOLCHAIN: local
         run: |
+          go env -w GOTOOLCHAIN=local
+          go mod tidy
+          go build -ldflags="-w -s" -o sui .
+
           go mod tidy
           go build -ldflags="-w -s" -o sui .
 
