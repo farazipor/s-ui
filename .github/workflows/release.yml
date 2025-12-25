@@ -1,0 +1,39 @@
+name: Build & Release s-ui
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build backend
+        run: |
+          go mod tidy
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o sui
+
+      - name: Prepare release files
+        run: |
+          mkdir -p s-ui
+          mv sui s-ui/
+          cp s-ui.service s-ui/
+          cp s-ui.sh s-ui/
+          tar -czf s-ui-linux-amd64.tar.gz s-ui
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: s-ui-linux-amd64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
