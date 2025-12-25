@@ -103,8 +103,7 @@ func EndpointRegistry() *endpoint.Registry {
 	registry := endpoint.NewRegistry()
 
 	wireguard.RegisterEndpoint(registry)
-	registerTailscaleEndpoint(registry)
-
+	
 	return registry
 }
 
@@ -124,14 +123,6 @@ func DNSTransportRegistry() *dns.TransportRegistry {
 	registerTailscaleTransport(registry)
 
 	return registry
-}
-
-func registerTailscaleEndpoint(registry *endpoint.Registry) {
-	tailscale.RegisterEndpoint(registry)
-}
-
-func registerTailscaleTransport(registry *dns.TransportRegistry) {
-	tailscale.RegistryTransport(registry)
 }
 
 func registerDERPService(registry *service.Registry) {
