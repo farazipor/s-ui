@@ -1,9 +1,3 @@
-- name: Debug versions
-  run: |
-    echo "GITHUB_REF=$GITHUB_REF"
-    git rev-parse HEAD
-    cat go.mod | sed -n '1,120p'
-    go list -m github.com/sagernet/sing-box
 name: build-and-release
 
 on:
