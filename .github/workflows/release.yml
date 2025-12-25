@@ -17,67 +17,48 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          fetch-depth: 0
 
-      # ---------- FRONTEND ----------
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: "frontend/package-lock.json"
 
       - name: Build frontend
         working-directory: frontend
-        env:
-          NODE_OPTIONS: "--max-old-space-size=4096"
         run: |
           npm ci || npm install
-          npm run build
-
-      # ---------- BACKEND ----------
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          # پیشنهاد: اول با 1.22/1.23 تست کن (پایدارتر برای خیلی از ماژول‌ها)
-          go-version: "1.23.x"
-          cache: true
-
-      - name: Install build deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential gcc
+          NODE_OPTIONS="--max-old-space-size=2048" npm run build
 
       - name: Prepare web assets for backend
         run: |
-          rm -rf web/html
           mkdir -p web/html
-          cp -r frontend/dist/* web/html/
+          cp -r frontend/dist/* web/html/ || true
 
       - name: Go mod tidy
-        run: |
-          go mod tidy
+        run: go mod tidy
 
-      - name: Build backend
+      - name: Build backend (linux amd64)
         env:
           CGO_ENABLED: "1"
+          GOOS: linux
+          GOARCH: amd64
         run: |
           go build -ldflags="-w -s" -o sui .
 
-      # ---------- PACKAGE ----------
-      - name: Make release tarball
+      - name: Package
         run: |
           mkdir -p out/s-ui
           cp sui out/s-ui/sui
-
-          # اگر این فایل‌ها رو داری تو ریپو، کپی میشن. اگر نداری، مرحله بعدی رو می‌گم.
           [ -f s-ui.service ] && cp s-ui.service out/s-ui/s-ui.service || true
           [ -f s-ui.sh ] && cp s-ui.sh out/s-ui/s-ui.sh || true
-
           tar -czf s-ui-linux-amd64.tar.gz -C out s-ui
 
-      - name: Upload to GitHub Release
+      - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            s-ui-linux-amd64.tar.gz
+          files: s-ui-linux-amd64.tar.gz
