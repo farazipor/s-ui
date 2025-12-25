@@ -1,6 +1,7 @@
 name: build-and-release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -44,12 +45,9 @@ jobs:
 
       - name: Package (tar.gz)
         run: |
-          mkdir -p dist/s-ui
-          cp -r web dist/s-ui/ || true
           mkdir -p dist/s-ui/web/html
           cp -r frontend/dist/* dist/s-ui/web/html/
           cp sui dist/s-ui/sui
-          cp -r systemd dist/s-ui/ 2>/dev/null || true
           tar -C dist -czf s-ui-linux-amd64.tar.gz s-ui
 
       - name: Create Release and upload asset
