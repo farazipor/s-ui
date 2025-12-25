@@ -120,7 +120,6 @@ func DNSTransportRegistry() *dns.TransportRegistry {
 
 	registerQUICTransports(registry)
 	registerDHCPTransport(registry)
-	registerTailscaleTransport(registry)
 
 	return registry
 }
